@@ -124,3 +124,4 @@ class XSectionPlugin(w.QWidget):
         fig.add_scattergl(x=list(zip(*elevation_profile))[0],
                           y=list(zip(*elevation_profile))[1])
         fig.show(renderer='browser')
+
