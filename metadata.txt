@@ -1,0 +1,9 @@
+[general]
+name=Profiler
+description=Cross section tool
+about=v1 cross section tool
+version=1.0
+qgisMinimumVersion=3.0
+author=Luke Mioduszewski
+email=lukem@aesgeo.com
+repository=None
