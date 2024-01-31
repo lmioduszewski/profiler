@@ -35,10 +35,11 @@ class XSectionPlugin(w.QWidget):
         self.buffer_rubber_band: gui.QgsRubberBand = None
         self.buffer_geometry = None
         self.vector_list_selection = None
-        self._nearby_features = None
+        self._nearby_features_as_ids= None
         self.dock_widget = w.QDockWidget(parent=self.profile_canvas)
         self.dock_widget.setWidget(self.main_widget)
         self._nearby_features_dict = None
+        self.fig = Fig()
 
     def initGui(self):
 
@@ -46,7 +47,7 @@ class XSectionPlugin(w.QWidget):
         self.add_button_to_toolbar(name='Select Line', callback_function=self.activate_select_line)
         self.feature_identifier.featureIdentified.connect(self.select_line_feature)
         self.add_button_to_toolbar(name='Plot Selected Line', callback_function=self.plot_selected_line)
-        self.add_button_to_toolbar(name='Test', callback_function=self.test_function)
+        self.add_button_to_toolbar(name='Get Nearby Features', callback_function=self.get_nearby_features_dict)
 
         self.tolerance_slider.setOrientation(Qt.Orientation(1))  # 1 = horizontal
         self.toolbar.addWidget(self.tolerance_slider)
@@ -135,50 +136,54 @@ class XSectionPlugin(w.QWidget):
         self.get_nearby_features_as_ids()
 
     def plot_selected_line(self):
-        self.plot_QgsFeature_MultiPolyline(self.selected_line)
+        x, z = self.get_profile_xz_from_QgsFeature(self.selected_line)
+        print(f"plotting line: {self.selected_line.id()} | {self.iface.activeLayer().name()}")
+        self.plot_fig(x, z)
 
-    def get_nearby_features_as_ids(
-            self,
-            # selected_line: core.QgsFeature = None
-    ):
-        """if selected_line is None:
-            selected_line = self.selected_line
-        selected_line_geometry = selected_line.geometry()"""
+    def get_nearby_features_as_ids(self) -> dict:
+        """Method to get nearby features to the selected line. Various other methods call this
+        to get nearby features when a gui element changes or is updated. That way
+        self.nearby_features_as_ids will always return the nearby features based on the currently
+        set parameters"""
         vector_layer_names_to_check = [item.text() for item in self.vector_list.selectedItems()]
         vector_layers_to_check = [self.get_layer_by_name(name) for name in vector_layer_names_to_check]
         spatial_index = gis.SpatialIndex(
             iface=self.iface,
             layers=vector_layers_to_check,
         )
-        nearby_features = spatial_index.get_nearby_features_ids(reference_geometry=self.buffer_geometry)
-        self._nearby_features = nearby_features
-        return nearby_features
+        nearby_features_ids = spatial_index.get_nearby_features_ids(reference_geometry=self.buffer_geometry)
+        self._nearby_features_as_ids = nearby_features_ids
+        return nearby_features_ids
 
-    def plot_QgsFeature_MultiPolyline(
-            self,
-            feature: core.QgsFeature,
-    ):
-        print(f"plotting line: {feature.id()} | {self.iface.activeLayer().name()}")
+    def get_profile_xz_from_QgsFeature(self, feature: core.QgsFeature):
         try:
             feature_geometry_as_multipolyline = feature.geometry().asMultiPolyline()[0]
         except TypeError:
             print('feature cannot be converted to a MultiPolyline')
             return
         line = core.QgsLineString(feature_geometry_as_multipolyline)
-        x, y = self.get_profile_xy(line=line)
-        self.plot_xy(x, y)
+        x, z = self.get_profile_xz(line=line)
+        return x, z
 
-    def plot_xy(self, x, y):
-        self.test_function()
+    def plot_fig(self, x, z):
+        # get nearby feature just in case
+        self.get_nearby_features_dict()
+        self.add_ground_line(x, z)
+        self.add_nearby_explo_lines()
+        # fig.write_image(Path().home().joinpath("output_xsection.pdf"), width=1500, height=750)
+        # fig.write_html(Path().home().joinpath("output_xsection.html"), config={'scrollZoom': True})
+        self.fig.show()
 
-        fig = Fig()
-        fig.add_scattergl(
-            x=x, y=y,
+    def add_ground_line(self, x, z):
+        self.fig.add_scattergl(
+            x=x, y=z,
             hoverinfo='y',
             name='Ground Surface Elevation',
             mode='lines',
             line_color='brown'
         )
+
+    def add_nearby_explo_lines(self, line_color='blue', line_width=2):
         for feature_name, feature_data_dict in self.nearby_features_dict.items():
             distance_along_line = feature_data_dict['distanceAlongLine']
             lidar_elevation = feature_data_dict['lidar']
@@ -189,24 +194,21 @@ class XSectionPlugin(w.QWidget):
             else:
                 bottom_elevation = lidar_elevation - total_depth
             if total_depth is None:
-                fig.add_scattergl(
+                self.fig.add_scattergl(
                     x=(distance_along_line,),
                     y=(lidar_elevation,),
                     name=feature_name
                 )
             else:
-                fig.add_scattergl(
+                self.fig.add_scattergl(
                     mode='lines',
-                    line_width=2,
-                    line_color='blue',
+                    line_width=line_width,
+                    line_color=line_color,
                     marker_symbol=1,
                     name=feature_name,
                     x=(distance_along_line, distance_along_line),
                     y=(lidar_elevation, bottom_elevation)
                 )
-        # fig.write_image(Path().home().joinpath("output_xsection.pdf"), width=1500, height=750)
-        # fig.write_html(Path().home().joinpath("output_xsection.html"), config={'scrollZoom': True})
-        fig.show()
 
     def get_elevation_of_QgsPointXY(
             self,
@@ -223,12 +225,19 @@ class XSectionPlugin(w.QWidget):
         else:
             return print(f"Elevation data not available at {point}")
 
-    def get_profile_xy(
+    def get_profile_xz(
             self,
-            dem_layer_name=None,
-            line=None,
+            dem_layer_name: str = None,
+            line: core.QgsLineString = None,
             num_points: int = 1000
-    ):
+    ) -> tuple:
+        """
+        This function needs some revisions
+        :param dem_layer_name: name of raster layer that is the reference dem
+        :param line: the profile line to get x, z coordinates, as a core.QgsLineString
+        :param num_points: Number of points to interpolate (increase for higher resolution)
+        :return: a tuple with an x-coordinate list and a z-coordinate list
+        """
         if dem_layer_name is None:
             dem_layer_name = self.raster_combobox.currentData().name()
         dem_layer = core.QgsProject.instance().mapLayersByName(dem_layer_name)[0]
@@ -238,7 +247,6 @@ class XSectionPlugin(w.QWidget):
         # CRS transformation from line CRS to DEM CRS
         # transform = core.QgsCoordinateTransform(line.crs(), dem_layer.crs(), transform_context)
 
-        # Number of points to interpolate (increase for higher resolution)
         line_length = line.length()
         interval = line_length / num_points
 
@@ -258,9 +266,9 @@ class XSectionPlugin(w.QWidget):
                 print("Elevation data not available at", point_on_line)
                 continue
         x = list(zip(*elevation_profile))[0]
-        y = list(zip(*elevation_profile))[1]
+        z = list(zip(*elevation_profile))[1]
 
-        return x, y
+        return x, z
 
     def draw_buffer(self):
         self.clear_rubber_band()
@@ -279,7 +287,7 @@ class XSectionPlugin(w.QWidget):
             self.buffer_rubber_band.reset()
             self.buffer_rubber_band = None
 
-    def test_function(self):
+    def get_nearby_features_dict(self):
         features = self.get_nearby_features_as_QgsFeatures()
         self._nearby_features_dict = {}
         for feature in features:
@@ -331,16 +339,18 @@ class XSectionPlugin(w.QWidget):
         return
 
     @property
-    def nearby_features(self):
-        return self._nearby_features
+    def nearby_features_as_ids(self):
+        return self._nearby_features_as_ids
 
     @property
     def nearby_features_dict(self):
         return self._nearby_features_dict
 
     def get_nearby_features_as_QgsFeatures(self):
+        """Iterates through self.nearby_features_as_ids which is a dict of layer names as keys and feature
+        ids and values. Returns a list of QgsFeatures corresponding to the self.nearby_features_as_ids dict."""
         nearby_QgsFeatures = []
-        for layer_name, feature_ids in self.nearby_features.items():
+        for layer_name, feature_ids in self.nearby_features_as_ids.items():
             layer = self.get_layer_by_name(layer_name)
             for fid in feature_ids:
                 feature = layer.getFeature(fid)
