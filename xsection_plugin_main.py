@@ -1,19 +1,27 @@
 """from qgis.PyQt.QtWidgets import (
     QAction, QMessageBox, QDockWidget, QToolBar,
     QComboBox)"""
-import math
+import sys
+from pathlib import Path
+custom_package_dir = Path(r'C:\Users\lukem\Python\Projects')
+#  add custom package path, so we can import custom packages from other directly.
+if str(custom_package_dir) not in sys.path:
+    sys.path.append(str(custom_package_dir))
 
+import math
 import qgis.PyQt.QtWidgets as w
 import qgis.gui as gui
 import qgis.core as core
+import bokeh.plotting as bkp
+from figs.bokeh_fig import BokehFig
 from qgis.PyQt.QtCore import Qt
-import plotly.graph_objs as go
-from . import gis_functions as gis
+try:
+    from . import gis_functions as gis
+except ImportError:
+    import gis_functions as gis
 from qgis.PyQt.QtGui import QColor
-import geopandas as gpd
-import shapely as shp
 from pathlib import Path
-from ._figure import Fig
+from figs._fig import Fig
 
 
 class XSectionPlugin(w.QWidget):
@@ -29,19 +37,31 @@ class XSectionPlugin(w.QWidget):
         self.feature_identifier = gui.QgsMapToolIdentifyFeature(self.iface.mapCanvas())
         self.raster_combobox = w.QComboBox()
         self.tolerance_slider = w.QSlider()
+
+        #  add radio buttons to choose plot renderer
+        self.plot_renderer = 'plotly'
+        self.plotly_radiobutton = w.QRadioButton('Plotly')
+        self.plotly_radiobutton.setCheckable(True)
+        self.plotly_radiobutton.toggled.connect(self.on_plot_radio_button_toggled)
+        self.bokeh_radiobutton = w.QRadioButton('Bokeh')
+        self.bokeh_radiobutton.setCheckable(True)
+        self.bokeh_radiobutton.toggled.connect(self.on_plot_radio_button_toggled)
+
         self.vector_list = w.QListWidget()
         self.selected_line: core.QgsFeature = None
         self.layer_for_selection: core.QgsMapLayer = None
         self.buffer_rubber_band: gui.QgsRubberBand = None
         self.buffer_geometry = None
         self.vector_list_selection = None
-        self._nearby_features_as_ids= None
+        self._nearby_features_as_ids = None
         self.dock_widget = w.QDockWidget(parent=self.profile_canvas)
         self.dock_widget.setWidget(self.main_widget)
         self._nearby_features_dict = None
         self.fig = Fig()
 
     def initGui(self):
+        """Basic plugin GUI initialization, like adding buttons and other components.
+        Runs at startup of plugin."""
 
         self.layout.addWidget(self.toolbar)
         self.add_button_to_toolbar(name='Select Line', callback_function=self.activate_select_line)
@@ -52,6 +72,8 @@ class XSectionPlugin(w.QWidget):
         self.tolerance_slider.setOrientation(Qt.Orientation(1))  # 1 = horizontal
         self.toolbar.addWidget(self.tolerance_slider)
         self.tolerance_slider.sliderReleased.connect(self.on_tolerance_slider_release)
+        self.toolbar.addWidget(self.plotly_radiobutton)
+        self.toolbar.addWidget(self.bokeh_radiobutton)
 
         self.layout.addWidget(self.raster_combobox)
         self.layout.addWidget(self.vector_list)
@@ -71,7 +93,7 @@ class XSectionPlugin(w.QWidget):
         # Reset the map tool to the default (e.g., pan tool)
         if self.iface.mapCanvas().mapTool() == self.feature_identifier:
             self.iface.mapCanvas().unsetMapTool(self.feature_identifier)
-        # Hide or close custom widgets or dockwidgets
+        # Hide or close custom widgets or dock widgets
         try:
             if self.main_widget.isVisible():
                 self.main_widget.close()
@@ -103,9 +125,8 @@ class XSectionPlugin(w.QWidget):
         """adds a button with 'name' that calls a 'callback_function to the main widget"""
         # define action
         action = w.QAction(text=name, parent=self.main_widget)
-        # add it to the toolbar as a push button
+        # add it to the toolbar as a button
         w.QPushButton.addAction(self.toolbar, action)
-        # connect action to the callback function
         action.triggered.connect(callback_function)
 
     def get_rasters_for_combobox(self):
@@ -122,6 +143,17 @@ class XSectionPlugin(w.QWidget):
         if self.selected_line:
             self.draw_buffer()
         self.get_nearby_features_as_ids()
+
+    def on_plot_radio_button_toggled(self, checked):
+        if checked:
+            if self.plotly_radiobutton.isChecked():
+                print("Plotly button is checked")
+                self.plot_renderer = 'plotly'
+                self.fig = Fig()
+            elif self.bokeh_radiobutton.isChecked():
+                print("Bokeh button is checked")
+                self.plot_renderer = 'bokeh'
+                self.fig = BokehFig()
 
     def activate_select_line(self):
         self.feature_identifier.setLayer(self.iface.activeLayer())
@@ -162,7 +194,7 @@ class XSectionPlugin(w.QWidget):
             print('feature cannot be converted to a MultiPolyline')
             return
         line = core.QgsLineString(feature_geometry_as_multipolyline)
-        x, z = self.get_profile_xz(line=line)
+        x, z = self.get_profile_xz_from_QgsLineString(line=line)
         return x, z
 
     def plot_fig(self, x, z):
@@ -170,20 +202,42 @@ class XSectionPlugin(w.QWidget):
         self.get_nearby_features_dict()
         self.add_ground_line(x, z)
         self.add_nearby_explo_lines()
-        # fig.write_image(Path().home().joinpath("output_xsection.pdf"), width=1500, height=750)
-        # fig.write_html(Path().home().joinpath("output_xsection.html"), config={'scrollZoom': True})
-        self.fig.show()
+        if self.plot_renderer == 'plotly':
+            self.fig.show()
+        elif self.plot_renderer == 'bokeh':
+            self.fig.show()
+
+    def write_fig_html(self, file_path: Path = None):
+        if file_path is None:
+            file_path = Path().home().joinpath("output_xsection.html")
+        self.fig.write_html(file_path, config={'scrollZoom': True})
+
+    def write_fig_image(self, file_path: Path = None, width=1500, height=750):
+        if file_path is None:
+            file_path = Path().home().joinpath("output_xsection.pdf")
+        self.fig.write_image(file_path, width=width, height=height)
 
     def add_ground_line(self, x, z):
-        self.fig.add_scattergl(
-            x=x, y=z,
-            hoverinfo='y',
-            name='Ground Surface Elevation',
-            mode='lines',
-            line_color='brown'
-        )
+        if self.plot_renderer == 'plotly':
+            self.fig: Fig
+            self.fig.add_scattergl(
+                x=x, y=z,
+                hoverinfo='y',
+                name='Ground Surface Elevation',
+                mode='lines',
+                line_color='brown'
+            )
+        elif self.plot_renderer == 'bokeh':
+            self.fig: BokehFig
+            self.fig.f.line(x=x, y=z)
 
     def add_nearby_explo_lines(self, line_color='blue', line_width=2):
+        """
+        Adds vertical lines to the plot that represent the nearby explorations.
+        :param line_color: color of the exploration lines
+        :param line_width: width of the exploration lines
+        :return:
+        """
         for feature_name, feature_data_dict in self.nearby_features_dict.items():
             distance_along_line = feature_data_dict['distanceAlongLine']
             lidar_elevation = feature_data_dict['lidar']
@@ -193,22 +247,27 @@ class XSectionPlugin(w.QWidget):
                 total_depth = None
             else:
                 bottom_elevation = lidar_elevation - total_depth
-            if total_depth is None:
-                self.fig.add_scattergl(
-                    x=(distance_along_line,),
-                    y=(lidar_elevation,),
-                    name=feature_name
+
+            if self.plot_renderer == 'plotly':
+                if total_depth is None:
+                    self.fig.add_scattergl(
+                        x=(distance_along_line,),
+                        y=(lidar_elevation,),
+                        name=feature_name
+                    )
+                else:
+                    self.fig.add_scattergl(
+                        mode='lines',
+                        line_width=line_width,
+                        line_color=line_color,
+                        marker_symbol=1,
+                        name=feature_name,
+                        x=(distance_along_line, distance_along_line),
+                        y=(lidar_elevation, bottom_elevation)
                 )
-            else:
-                self.fig.add_scattergl(
-                    mode='lines',
-                    line_width=line_width,
-                    line_color=line_color,
-                    marker_symbol=1,
-                    name=feature_name,
-                    x=(distance_along_line, distance_along_line),
-                    y=(lidar_elevation, bottom_elevation)
-                )
+                """if feature_data_dict['screenTopBotElev'] is not None:
+                    screen_top, screen_bot = feature_data_dict['screenTopBotElev']
+                    self.fig.add_scattergl()"""
 
     def get_elevation_of_QgsPointXY(
             self,
@@ -225,7 +284,7 @@ class XSectionPlugin(w.QWidget):
         else:
             return print(f"Elevation data not available at {point}")
 
-    def get_profile_xz(
+    def get_profile_xz_from_QgsLineString(
             self,
             dem_layer_name: str = None,
             line: core.QgsLineString = None,
@@ -303,12 +362,20 @@ class XSectionPlugin(w.QWidget):
                 explo_depth = feature.attribute('ExploDepth')
             else:
                 explo_depth = None
+            project_number = feature.attribute('AESI_Pro_1')
             d = self.get_distance_of_geometry_to_line_geometry(
                 geometry_to_check=feature.geometry().centroid().asPoint())
             elevation = self.get_elevation_of_QgsPointXY(point=feature.geometry().asPoint())
             d['lidar'] = elevation
             d['ExploDepth'] = explo_depth
+            d['projectNumber'] = project_number
             self._nearby_features_dict[name] = d
+
+    def get_screen_elevations(self, point_name: str):
+        screen_top = None
+        screen_bot = None
+        screen_top_bot = (screen_top, screen_bot)
+        return screen_top_bot
 
     def get_layer_by_name(self, name: str):
         """
@@ -369,7 +436,7 @@ class XSectionPlugin(w.QWidget):
         :return: dict with keys: 'Dist' - distance, 'minDistPoint' - point on reference geometry that is closest to the
         geometry to check, 'nextVertexIndex' - index of the next vertex after the closest segment. The vertex before the
         closest segment is always nextVertexIndex - 1, 'leftOrRightOfSegment' - indicates if the point is located on the
-        left or right side of the geometry ( < 0 means left, > 0 means right, 0 indicates that the test was
+        left or right side of the geometry (< 0 means left, > 0 means right), 0 indicates that the test was
         unsuccessful, e.g. for a point exactly on the line, 'distanceAlongLine' - distance along the length of the
         reference line to the point of closest distance to teh geometry_to_check.
         """
