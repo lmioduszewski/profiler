@@ -1,17 +1,26 @@
-import duckdb
-from pathlib import Path
-import pandas as pd
-import numpy as np
+from bokeh.io import show
+from bokeh.models import ColumnDataSource, PolyDrawTool, PolyEditTool
+from bokeh.plotting import figure
 
-explo_database = Path.home() / "Python\Projects\qgis-plugin-xsections\Exploration_Database.csv"
-"""explo_database = pd.read_csv(explo_database)
-explo_database = explo_database.iloc[1:, :]
-explo_database[explo_database == '--'] = np.nan
-explo_database = explo_database.iloc[:111, :]"""
+# Create initial data for polygons
+xs = [[1, 3, 2], [3, 4, 6, 6]]
+ys = [[4, 6, 8], [7, 8, 7, 5]]
 
-with duckdb.connect("file.db") as con:
-    # con.from_df(explo_database).create('explo')
-    # print(con.table('explo'))
-    con.execute("SELECT COUNT(*) from explo WHERE exploration LIKE 'EB-%'")
-    print(con.fetchall())
+source = ColumnDataSource(data=dict(xs=xs, ys=ys))
 
+# Create a new plot
+p = figure(title="PolyDraw and PolyEdit Example")
+p.x_range.start, p.x_range.end = 0, 10
+p.y_range.start, p.y_range.end = 0, 10
+
+# Add patches renderer to the figure
+renderer = p.patches('xs', 'ys', source=source, fill_color='blue', line_width=2)
+
+# Initialize and add the PolyDraw and PolyEdit tools
+draw_tool = PolyDrawTool(renderers=[renderer])
+edit_tool = PolyEditTool(renderers=[renderer])
+p.add_tools(draw_tool, edit_tool)
+p.toolbar.active_tap = edit_tool
+
+# Show the plot
+show(p)

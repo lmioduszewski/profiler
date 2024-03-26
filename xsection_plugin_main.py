@@ -3,6 +3,7 @@
     QComboBox)"""
 import sys
 from pathlib import Path
+
 custom_package_dir = Path(r'C:\Users\lukem\Python\Projects')
 #  add custom package path, so we can import custom packages from other directly.
 if str(custom_package_dir) not in sys.path:
@@ -13,8 +14,9 @@ import qgis.PyQt.QtWidgets as w
 import qgis.gui as gui
 import qgis.core as core
 import bokeh.plotting as bkp
-from figs.bokeh_fig import BokehFig
+from .bokeh_fig import BokehFig
 from qgis.PyQt.QtCore import Qt
+
 try:
     from . import gis_functions as gis
 except ImportError:
@@ -58,6 +60,7 @@ class XSectionPlugin(w.QWidget):
         self.dock_widget.setWidget(self.main_widget)
         self._nearby_features_dict = None
         self.fig = Fig()
+        print('plugin has inited')
 
     def initGui(self):
         """Basic plugin GUI initialization, like adding buttons and other components.
@@ -229,7 +232,7 @@ class XSectionPlugin(w.QWidget):
             )
         elif self.plot_renderer == 'bokeh':
             self.fig: BokehFig
-            self.fig.f.line(x=x, y=z)
+            self.fig.line(x=x, y=z)
 
     def add_nearby_explo_lines(self, line_color='blue', line_width=2):
         """
@@ -264,7 +267,7 @@ class XSectionPlugin(w.QWidget):
                         name=feature_name,
                         x=(distance_along_line, distance_along_line),
                         y=(lidar_elevation, bottom_elevation)
-                )
+                    )
                 """if feature_data_dict['screenTopBotElev'] is not None:
                     screen_top, screen_bot = feature_data_dict['screenTopBotElev']
                     self.fig.add_scattergl()"""
