@@ -4,6 +4,8 @@
 import sys
 from pathlib import Path
 
+import bokeh.plotting
+
 custom_package_dir = Path(r'C:\Users\lukem\Python\Projects')
 #  add custom package path, so we can import custom packages from other directly.
 if str(custom_package_dir) not in sys.path:
@@ -271,6 +273,20 @@ class XSectionPlugin(w.QWidget):
                 """if feature_data_dict['screenTopBotElev'] is not None:
                     screen_top, screen_bot = feature_data_dict['screenTopBotElev']
                     self.fig.add_scattergl()"""
+            elif self.plot_renderer == 'bokeh':
+                if total_depth is None:
+                    self.fig: BokehFig
+                    self.fig.f.scatter(
+                        x=(distance_along_line,),
+                        y=(lidar_elevation,),
+                        name=feature_name
+                    )
+                else:
+                    self.fig.f.line(
+                        name=feature_name,
+                        x=(distance_along_line, distance_along_line),
+                        y=(lidar_elevation, bottom_elevation)
+                    )
 
     def get_elevation_of_QgsPointXY(
             self,

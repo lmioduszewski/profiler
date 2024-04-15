@@ -5,7 +5,9 @@ from bokeh.models.tools import (
     HoverTool, SaveTool, BoxSelectTool, LassoSelectTool,
     PointDrawTool, PolyDrawTool, PolyEditTool, TapTool
 )
-from bokeh.models import ColumnDataSource
+from bokeh.models import ColumnDataSource, Legend
+from pathlib import Path
+import pandas as pd
 
 
 class BokehFig:
@@ -52,7 +54,7 @@ class BokehFig:
             self.tap_tool
         ]
         self.f.sizing_mode = 'stretch_both'
-        self.f.output_backend = 'webgl' if webgl is True else None
+        self.f.output_backend = 'webgl' if webgl is True else 'canvas'
         self.f.tools = tool_list
         self.f.toolbar.active_scroll = self.wheel_zoom_tool
         self.f.toolbar.logo = None  # Remove Bokeh logo from toolbar
@@ -65,15 +67,35 @@ class BokehFig:
         self.f.xaxis.update(**axis_props)
         self.f.yaxis.update(**axis_props)
 
-
     def show(self):
+        self.f.legend.click_policy = "hide"
+        #  set legend location to left outside the plot
+        legend = self.f.legend[0]
+        self.f.add_layout(legend, place='left')
         return bkp.show(self.f)
 
-    def line(self, *args, **kwargs):
-        return self.f.line(*args, **kwargs)
+    def line(self, legend_label='None', *args, **kwargs):
+        return self.f.line(legend_label=legend_label, *args, **kwargs)
 
 
 if __name__ == "__main__":
-    fig = BokehFig()
-    fig.f.line(x=[1, 2, 3], y=[1, 6, 8])
+    from bokeh_fig import BokehFig
+    from bokeh.plotting import figure, show
+    from bokeh.models import ColumnDataSource
+    import random
+    import plotly.graph_objs as go
+    from figs._fig import Fig
+
+    path = Path().home() / 'Python/data/tehaleh_wls.xlsx'
+    df_dd = pd.read_excel(path, sheet_name='WellDD').set_index('Date Time').apply(
+        lambda column: pd.to_numeric(column, errors='coerce'))
+    df_dd = df_dd.drop(['Month', 'Year', 'Water Year'], axis='columns').dropna(how='all')
+    fig = BokehFig(x_axis_type="datetime")
+    pfig = Fig()
+    source = ColumnDataSource(df_dd)
+    for col in df_dd.columns:
+        fig.f.line(x='Date Time', legend_label=col, y=col, source=source)
+        pfig.add_scattergl(x=df_dd.index, y=df_dd[col])
     fig.show()
+    pfig.show()
+
